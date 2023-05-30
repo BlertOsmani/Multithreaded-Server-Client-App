@@ -64,3 +64,67 @@ while(1){
 
     return NULL;
 }
+
+
+// Function to add a client to the list of connected clients
+void addClient(pid_t client_pid, int msg_queue_id) {
+    sem_wait(&clientsSemaphore);
+
+    if (numClients < MAX_CLIENTS) {
+        clients[numClients].client_pid = client_pid;
+        clients[numClients].msg_queue_id = msg_queue_id;
+
+        // Create a new thread for the client
+        if (pthread_create(&clients[numClients].thread_id, NULL, processClient, &clients[numClients]) != 0) {
+            fprintf(stderr, "Failed to create thread for client %d\n", client_pid);
+            exit(1);
+        }
+
+        numClients++;
+
+        // Send a response to the client
+        struct message response;
+        response.mtype = client_pid;
+        response.client_pid = getpid();
+        snprintf(response.mtext, sizeof(response.mtext), "You have been connected to the server");
+        if (msgsnd(msg_queue_id, &response, sizeof(response.mtext), 0) == -1) {
+            perror("msgsnd");
+            exit(1);
+        }
+    } else {
+        fprintf(stderr, "Max number of clients reached. Unable to add client %d\n", client_pid);
+    }
+
+    sem_post(&clientsSemaphore);
+}
+
+// Function to remove a client from the list of connected clients
+void removeClient(pid_t client_pid) {
+    sem_wait(&clientsSemaphore);
+
+    int i, clientIndex = -1;
+    for (i = 0; i < numClients; i++) {
+        if (clients[i].client_pid == client_pid) {
+            clientIndex = i;
+            break;
+        }
+    }
+
+    if (clientIndex != -1) {
+        // Terminate the client's thread
+        if (pthread_cancel(clients[clientIndex].thread_id) != 0) {
+            fprintf(stderr, "Failed to terminate thread for client %d\n", client_pid);
+            exit(1);
+        }
+
+        // Remove the client from the list
+        numClients--;
+        for (i = clientIndex; i < numClients; i++) {
+            clients[i] = clients[i + 1];
+        }
+    } else {
+        fprintf(stderr, "Client %d not found in the list of connected clients\n", client_pid);
+    }
+
+    sem_post(&clientsSemaphore);
+}

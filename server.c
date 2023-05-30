@@ -128,3 +128,81 @@ void removeClient(pid_t client_pid) {
 
     sem_post(&clientsSemaphore);
 }
+int main() {
+    struct message msg;
+
+    // Generate a unique key for the message queue
+    key_t key = ftok(".", 'm');
+    if (key == -1) {
+        perror("ftok");
+        exit(1);
+    }
+
+    // Create the message queue
+    int msgQueueId = msgget(key, IPC_CREAT | 0666);
+    if (msgQueueId == -1) {
+        printf("Error: Failed to create or access the message queue.\n");
+        perror("msgget");
+        exit(1);
+    }
+
+    // Initialize the clients semaphore
+    if (sem_init(&clientsSemaphore, 0, 1) != 0) {
+        perror("sem_init");
+        exit(1);
+    }
+
+    printf("Message queue server started.\n");
+
+    // Continuously accept connections from clients and process messages
+    while (1) {
+        // Receive a message from any client
+        if (msgrcv(msgQueueId, &msg, sizeof(msg.mtext), 0, 0) == -1) {
+            perror("msgrcv");
+            exit(1);
+        }
+
+        if (strcmp(msg.mtext, "Connect") == 0) {
+            // Connection request from a client
+            printf("Received connection request from client %d\n", msg.client_pid);
+
+            // Add the client to the list of connected clients
+            addClient(msg.client_pid, msgQueueId);
+        } else if (strcmp(msg.mtext, "Disconnect") == 0) {
+            // Disconnect request from a client
+            printf("Received disconnect request from client %d\n", msg.client_pid);
+
+            // Remove the client from the list of connected clients
+            removeClient(msg.client_pid);
+        } else {
+            // Message from a connected client
+            printf("Message from client %d: %s\n", msg.client_pid, msg.mtext);
+
+            // Send a response to the client
+            struct message response;
+            response.mtype = msg.client_pid;
+            response.client_pid = getpid();
+            strcpy(response.mtext, "Your message has been sent to the server");
+
+            // Send the response message to the client
+            if (msgsnd(msgQueueId, &response, sizeof(response.mtext), 0) == -1) {
+                perror("msgsnd");
+                exit(1);
+            }
+        }
+    }
+
+    // Remove the message queue
+    if (msgctl(msgQueueId, IPC_RMID, NULL) == -1) {
+        perror("msgctl");
+        exit(1);
+    }
+
+    // Destroy the clients semaphore
+    if (sem_destroy(&clientsSemaphore) != 0) {
+        perror("sem_destroy");
+        exit(1);
+    }
+
+    return 0;
+}
